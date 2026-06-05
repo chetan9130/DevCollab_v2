@@ -11,6 +11,15 @@ export default function registerSocketHandlers(io, socket) {
 
     console.log(`[Socket ${socket.id}] Joining room: ${roomId}`);
     
+    // Leave all other rooms first (excluding the client's own socket.id room)
+    for (const room of socket.rooms) {
+      if (room !== socket.id && room !== roomId) {
+        console.log(`[Socket ${socket.id}] Leaving room ${room} prior to joining ${roomId}`);
+        socket.leave(room);
+        socket.to(room).emit('peer_left', { peerId: socket.id });
+      }
+    }
+    
     // Join socket to room
     socket.join(roomId);
     
@@ -32,6 +41,17 @@ export default function registerSocketHandlers(io, socket) {
         roomId,
         peers: existingPeers
       });
+    }
+  });
+
+  // Handle explicit room leaving
+  socket.on('leave_room', ({ roomId }, callback) => {
+    if (!roomId) return;
+    console.log(`[Socket ${socket.id}] Explicitly leaving room: ${roomId}`);
+    socket.leave(roomId);
+    socket.to(roomId).emit('peer_left', { peerId: socket.id });
+    if (typeof callback === 'function') {
+      callback({ status: 'ok', roomId });
     }
   });
 
@@ -64,3 +84,4 @@ export default function registerSocketHandlers(io, socket) {
     console.log(`[Socket ${socket.id}] Disconnected`);
   });
 }
+

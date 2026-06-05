@@ -81,6 +81,25 @@ export const socketService = {
   },
 
   /**
+   * Emit a request to leave a room.
+   * @param {string} roomId The target room name/id.
+   * @param {Function} callback Handler receiving the server acknowledgment response.
+   */
+  leaveRoom(roomId, callback) {
+    const s = this.getSocket();
+    if (!s.connected) {
+      console.error('[SocketService] Cannot leave room: socket connection is inactive');
+      return;
+    }
+
+    console.log(`[SocketService] Emitting leave_room event for: ${roomId}`);
+    s.emit('leave_room', { roomId }, (response) => {
+      console.log('[SocketService] Room leave acknowledgment response:', response);
+      if (callback) callback(response);
+    });
+  },
+
+  /**
    * Relay a WebRTC signaling payload to a target peer.
    * @param {string} to Target peer socket ID.
    * @param {any} signal WebRTC Session Description (SDP offer/answer) or ICE Candidate payload.
