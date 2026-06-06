@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { socketService } from '../services/socket';
 import TerminalConsole from '../components/TerminalConsole';
+import { useScreenShare } from '../hooks/useScreenShare';
+import ScreenView from '../components/ScreenView';
 
 // Premium Video Feed Component for clean encapsulation
 function VideoFeed({ stream, isMuted, className, name, camEnabled, micEnabled, mirror = false }) {
@@ -82,6 +84,30 @@ export default function RoomPage() {
   const localStreamRef = useRef(null);
   const candidateQueuesRef = useRef({}); // { [peerId]: [RTCIceCandidate] }
 
+  // Screen Sharing State
+  const [screenSharer, setScreenSharer] = useState(null);
+
+  // Screen Sharing Hook
+  const { isSharing, startShare, stopShare, screenStream } = useScreenShare({
+    pcsRef,
+    localStreamRef,
+    roomId: activeRoomId
+  });
+
+  // Synchronize screenSharer state when we start/stop sharing
+  useEffect(() => {
+    if (isSharing) {
+      setScreenSharer(socketId);
+    } else {
+      setScreenSharer(current => current === socketId ? null : current);
+    }
+  }, [isSharing, socketId]);
+
+  // Username states
+  const [usernameInput, setUsernameInput] = useState('');
+  const [activeUsername, setActiveUsername] = useState('');
+  const [peerUsernames, setPeerUsernames] = useState({}); // { [peerId]: username }
+
   // Processes any queued ICE candidates for a peer once remote description is set
   const processIceQueue = async (peerId) => {
     const pc = pcsRef.current[peerId];
@@ -137,16 +163,17 @@ export default function RoomPage() {
       }
     );
 
-    // Register signaling event listeners
     socketService.registerEvents({
-      onPeerJoined: ({ peerId }) => {
+      onPeerJoined: ({ peerId, username }) => {
         setPeers((prev) => {
           if (!prev.includes(peerId)) {
             return [...prev, peerId];
           }
           return prev;
         });
-        addLog('success', `Peer joined: ${peerId}`);
+        const displayName = username || `Peer_${peerId.substring(0, 4)}`;
+        setPeerUsernames(prev => ({ ...prev, [peerId]: displayName }));
+        addLog('success', `Peer joined: ${displayName}`);
         // Initialize peer connection as receiver (wait for offer)
         initializePeerConnection(peerId, false);
       },
@@ -238,6 +265,16 @@ export default function RoomPage() {
         else if (signal.type === 'message') {
           addLog('signal', `Message from ${from.substring(0, 6)}...: "${signal.content}"`);
         }
+      },
+
+      onScreenShareStarted: ({ from }) => {
+        addLog('system', `Screen share started by: ${from.substring(0, 6)}...`);
+        setScreenSharer(from);
+      },
+
+      onScreenShareStopped: ({ from }) => {
+        addLog('system', `Screen share stopped by: ${from.substring(0, 6)}...`);
+        setScreenSharer(currentSharer => currentSharer === from ? null : currentSharer);
       }
     });
 
@@ -394,6 +431,12 @@ export default function RoomPage() {
     if (candidateQueuesRef.current[peerId]) {
       delete candidateQueuesRef.current[peerId];
     }
+    setScreenSharer(currentSharer => currentSharer === peerId ? null : currentSharer);
+    setPeerUsernames(prev => {
+      const copy = { ...prev };
+      delete copy[peerId];
+      return copy;
+    });
     setRemoteStreams(prev => {
       const copy = { ...prev };
       delete copy[peerId];
@@ -409,6 +452,11 @@ export default function RoomPage() {
 
   // Reset and leave all connections and calls
   const cleanupAllCalls = () => {
+    try {
+      stopShare();
+    } catch (err) {
+      console.warn('Error stopping screen share during cleanup:', err);
+    }
     stopLocalStream();
     Object.keys(pcsRef.current).forEach(peerId => {
       pcsRef.current[peerId].close();
@@ -419,6 +467,8 @@ export default function RoomPage() {
     setPeerStates({});
     setPeers([]);
     setActiveRoomId('');
+    setScreenSharer(null);
+    setPeerUsernames({});
   };
 
   // Handles joining room and starts WebRTC call
@@ -427,18 +477,31 @@ export default function RoomPage() {
     const cleanRoomId = roomIdInput.trim();
     if (!cleanRoomId) return;
 
+    const chosenUsername = usernameInput.trim() || `User_${socketId ? socketId.substring(0, 4) : 'local'}`;
+
     cleanupAllCalls();
-    addLog('system', `Joining workspace room: "${cleanRoomId}"...`);
+    addLog('system', `Joining workspace room: "${cleanRoomId}" as "${chosenUsername}"...`);
 
     // 1. Acquire local camera and mic first
     const stream = await startLocalStream();
 
     // 2. Connect to the room
-    socketService.joinRoom(cleanRoomId, (response) => {
+    socketService.joinRoom(cleanRoomId, chosenUsername, (response) => {
       if (response && response.status === 'ok') {
         setActiveRoomId(response.roomId);
+        setActiveUsername(chosenUsername);
         setPeers(response.peers || []);
         addLog('success', `Joined room "${response.roomId}". Discovered ${response.peers.length} other peer(s).`);
+        
+        if (response.peerUsernames) {
+          setPeerUsernames(response.peerUsernames);
+        }
+
+        if (response.screenSharer) {
+          const sharerName = response.peerUsernames?.[response.screenSharer] || response.screenSharer.substring(0, 6);
+          addLog('system', `Active screen share in room by: ${sharerName}`);
+          setScreenSharer(response.screenSharer);
+        }
 
         // 3. Initiate WebRTC peer connections with each existing peer
         response.peers.forEach(peerId => {
@@ -606,6 +669,14 @@ export default function RoomPage() {
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 select-none">My Session</h3>
             {connectionStatus === 'connected' ? (
               <div className="space-y-3 font-mono">
+                {activeUsername && (
+                  <div>
+                    <span className="text-xs text-slate-500 block">USERNAME</span>
+                    <span className="text-sm text-pink-300 break-all font-semibold bg-pink-950/20 px-2 py-1 rounded border border-pink-900/30 block mt-1">
+                      {activeUsername}
+                    </span>
+                  </div>
+                )}
                 <div>
                   <span className="text-xs text-slate-500 block">SESSION ID</span>
                   <span className="text-sm text-indigo-300 break-all font-semibold select-all bg-indigo-950/30 px-2 py-1 rounded border border-indigo-900/40 block mt-1">
@@ -632,6 +703,21 @@ export default function RoomPage() {
             
             {!activeRoomId ? (
               <form onSubmit={handleJoinRoom} className="space-y-4">
+                <div>
+                  <label htmlFor="username" className="block text-xs font-mono text-slate-400 mb-2">
+                    YOUR USERNAME
+                  </label>
+                  <input
+                    id="username"
+                    type="text"
+                    placeholder="e.g. karan"
+                    value={usernameInput}
+                    onChange={(e) => setUsernameInput(e.target.value)}
+                    disabled={connectionStatus !== 'connected'}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm font-mono text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors disabled:opacity-50"
+                  />
+                </div>
+
                 <div>
                   <label htmlFor="room-id" className="block text-xs font-mono text-slate-400 mb-2">
                     WORKSPACE ROOM ID
@@ -706,9 +792,23 @@ export default function RoomPage() {
                 </div>
               ) : (
                 <div className="space-y-6">
+                  {/* Pinned Screen Share */}
+                  {screenSharer && (
+                    <div className="mb-6">
+                      <ScreenView
+                        stream={isSharing ? screenStream : remoteStreams[screenSharer]}
+                        sharerName={screenSharer === socketId ? activeUsername : (peerUsernames[screenSharer] || screenSharer.substring(0, 6))}
+                        isLocal={screenSharer === socketId || isSharing}
+                        onRequestControl={screenSharer !== socketId ? () => addLog('system', `Requested remote control for ${peerUsernames[screenSharer] || screenSharer.substring(0, 6)} (wiring in Phase 3)...`) : null}
+                      />
+                    </div>
+                  )}
+
                   {/* WebRTC Video Feeds Grid */}
                   <div className={`grid gap-4 ${
-                    peers.length === 0 
+                    screenSharer 
+                      ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 max-w-3xl mx-auto' 
+                      : peers.length === 0 
                       ? 'grid-cols-1 max-w-md mx-auto' 
                       : peers.length === 1 
                       ? 'grid-cols-1 sm:grid-cols-2' 
@@ -718,8 +818,8 @@ export default function RoomPage() {
                     <VideoFeed
                       stream={localStream}
                       isMuted={true}
-                      className="border-indigo-500/35 glow-indigo/5"
-                      name={`${socketId ? socketId.substring(0, 6) : 'Local'} (You)`}
+                      className={`border-indigo-500/35 glow-indigo/5 ${screenSharer ? 'aspect-video' : ''}`}
+                      name={`${activeUsername || 'Local'} (You)`}
                       camEnabled={camEnabled}
                       micEnabled={micEnabled}
                       mirror={true}
@@ -734,7 +834,7 @@ export default function RoomPage() {
                           stream={stream}
                           isMuted={false}
                           className="border-slate-800 hover:border-indigo-500/20"
-                          name={`Peer: ${peerId.substring(0, 6)}`}
+                          name={peerUsernames[peerId] || `Peer: ${peerId.substring(0, 6)}`}
                           camEnabled={state.camEnabled}
                           micEnabled={state.micEnabled}
                           mirror={false}
@@ -744,7 +844,7 @@ export default function RoomPage() {
                   </div>
 
                   {/* WebRTC Controls Panel */}
-                  <div className="flex items-center justify-center space-x-4 p-3 bg-slate-950/60 border border-slate-800 rounded-2xl max-w-xs mx-auto shadow-md">
+                  <div className="flex items-center justify-center space-x-4 p-3 bg-slate-950/60 border border-slate-800 rounded-2xl max-w-sm mx-auto shadow-md">
                     {/* Toggle Microphone */}
                     <button
                       onClick={toggleMicrophone}
@@ -793,6 +893,22 @@ export default function RoomPage() {
                       )}
                     </button>
 
+                    {/* Toggle Screen Share */}
+                    <button
+                      onClick={isSharing ? stopShare : startShare}
+                      disabled={!localStream || (screenSharer && screenSharer !== socketId)}
+                      className={`p-3 rounded-xl border transition-all cursor-pointer ${
+                        isSharing 
+                          ? 'bg-rose-950/60 border-rose-800 text-rose-400 hover:text-rose-350 hover:bg-rose-900/60 animate-pulse' 
+                          : 'bg-slate-900 border-slate-800 text-indigo-400 hover:text-indigo-300 hover:bg-slate-850'
+                      } disabled:opacity-30`}
+                      title={isSharing ? 'Stop Screen Share' : 'Share Screen'}
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25" />
+                      </svg>
+                    </button>
+
                     {/* Disconnect/Leave call */}
                     <button
                       onClick={handleLeaveRoom}
@@ -816,8 +932,8 @@ export default function RoomPage() {
                       <div key={peerId} className="bg-slate-900/50 border border-slate-800/40 rounded-xl p-3 flex items-center justify-between hover:border-slate-800 transition-colors shadow-inner">
                         <div className="flex items-center space-x-2.5 overflow-hidden">
                           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
-                          <span className="text-xs font-mono text-indigo-300 truncate font-semibold" title={peerId}>
-                            {peerId.substring(0, 12)}...
+                          <span className="text-xs font-mono text-indigo-300 truncate font-semibold" title={`${peerUsernames[peerId] || 'User'} (${peerId})`}>
+                            {peerUsernames[peerId] || peerId.substring(0, 12)}
                           </span>
                         </div>
                         <button
@@ -854,7 +970,7 @@ export default function RoomPage() {
               <form onSubmit={submitTextMessage} className="mt-6 p-4 border border-indigo-900/40 bg-indigo-950/10 rounded-xl animate-fadeIn space-y-3">
                 <div className="flex justify-between items-center select-none">
                   <span className="text-xs font-mono text-indigo-400 font-medium">
-                    Send Signal payload message to: <strong className="break-all">{customMsgTarget.substring(0, 8)}...</strong>
+                    Send Signal payload message to: <strong className="break-all">{peerUsernames[customMsgTarget] || customMsgTarget.substring(0, 8)}</strong>
                   </span>
                   <button
                     type="button"

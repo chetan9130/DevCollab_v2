@@ -64,17 +64,18 @@ export const socketService = {
   /**
    * Emit a request to join a room.
    * @param {string} roomId The target room name/id.
-   * @param {Function} callback Handler receiving the server acknowledgment response (status and peers list).
+   * @param {string} username The chosen username of the local peer.
+   * @param {Function} callback Handler receiving the server acknowledgment response.
    */
-  joinRoom(roomId, callback) {
+  joinRoom(roomId, username, callback) {
     const s = this.getSocket();
     if (!s.connected) {
       console.error('[SocketService] Cannot join room: socket connection is inactive');
       return;
     }
 
-    console.log(`[SocketService] Emitting join_room event for: ${roomId}`);
-    s.emit('join_room', { roomId }, (response) => {
+    console.log(`[SocketService] Emitting join_room event for: ${roomId} with username: ${username}`);
+    s.emit('join_room', { roomId, username }, (response) => {
       console.log('[SocketService] Room join acknowledgment response:', response);
       if (callback) callback(response);
     });
@@ -116,20 +117,44 @@ export const socketService = {
   },
 
   /**
+   * Emit screen share started event to the server.
+   * @param {string} roomId The active room ID.
+   */
+  startScreenShare(roomId) {
+    const s = this.getSocket();
+    if (!s.connected) return;
+    console.log(`[SocketService] Emitting screen_share_started for room: ${roomId}`);
+    s.emit('screen_share_started', { roomId });
+  },
+
+  /**
+   * Emit screen share stopped event to the server.
+   * @param {string} roomId The active room ID.
+   */
+  stopScreenShare(roomId) {
+    const s = this.getSocket();
+    if (!s.connected) return;
+    console.log(`[SocketService] Emitting screen_share_stopped for room: ${roomId}`);
+    s.emit('screen_share_stopped', { roomId });
+  },
+
+  /**
    * Register listeners for incoming socket actions from other room peers.
    * @param {object} listeners Event handlers for peer events.
    * @param {Function} listeners.onPeerJoined Triggered when another peer joins.
    * @param {Function} listeners.onPeerLeft Triggered when a peer disconnects or leaves.
    * @param {Function} listeners.onSignal Triggered when a signal relay is received.
+   * @param {Function} listeners.onScreenShareStarted Triggered when a peer starts sharing screen.
+   * @param {Function} listeners.onScreenShareStopped Triggered when a peer stops sharing screen.
    */
-  registerEvents({ onPeerJoined, onPeerLeft, onSignal }) {
+  registerEvents({ onPeerJoined, onPeerLeft, onSignal, onScreenShareStarted, onScreenShareStopped }) {
     const s = this.getSocket();
 
     if (onPeerJoined) {
       s.off('peer_joined');
-      s.on('peer_joined', ({ peerId }) => {
-        console.log(`[SocketService] peer_joined: ${peerId}`);
-        onPeerJoined({ peerId });
+      s.on('peer_joined', ({ peerId, username }) => {
+        console.log(`[SocketService] peer_joined: ${peerId} | Username: ${username}`);
+        onPeerJoined({ peerId, username });
       });
     }
 
@@ -148,6 +173,22 @@ export const socketService = {
         onSignal({ from, signal });
       });
     }
+
+    if (onScreenShareStarted) {
+      s.off('screen_share_started');
+      s.on('screen_share_started', ({ from }) => {
+        console.log(`[SocketService] screen_share_started from: ${from}`);
+        onScreenShareStarted({ from });
+      });
+    }
+
+    if (onScreenShareStopped) {
+      s.off('screen_share_stopped');
+      s.on('screen_share_stopped', ({ from }) => {
+        console.log(`[SocketService] screen_share_stopped from: ${from}`);
+        onScreenShareStopped({ from });
+      });
+    }
   },
 
   /**
@@ -158,6 +199,8 @@ export const socketService = {
       socket.off('peer_joined');
       socket.off('peer_left');
       socket.off('signal');
+      socket.off('screen_share_started');
+      socket.off('screen_share_stopped');
     }
   }
 };

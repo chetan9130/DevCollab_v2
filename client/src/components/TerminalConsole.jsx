@@ -5,12 +5,12 @@ import React, { useEffect, useRef } from 'react';
  * Displays real-time WebSockets event logs with custom levels and timestamps.
  */
 export default function TerminalConsole({ logs, onClear }) {
-  const terminalEndRef = useRef(null);
+  const containerRef = useRef(null);
 
-  // Auto-scroll terminal to the bottom when logs change
+  // Auto-scroll terminal container to the bottom when logs change
   useEffect(() => {
-    if (terminalEndRef.current) {
-      terminalEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
   }, [logs]);
 
@@ -50,7 +50,10 @@ export default function TerminalConsole({ logs, onClear }) {
       </div>
 
       {/* Log Feed */}
-      <div className="flex-1 p-4 h-64 overflow-y-auto font-mono text-xs md:text-sm space-y-1.5 min-h-[220px]">
+      <div
+        ref={containerRef}
+        className="flex-1 p-4 h-64 overflow-y-auto font-mono text-xs md:text-sm space-y-1.5 min-h-[220px] scroll-smooth"
+      >
         {logs.length === 0 ? (
           <div className="text-slate-500 italic flex items-center h-full justify-center">
             <span>Terminal ready. Awaiting connection and socket events...</span>
@@ -71,7 +74,6 @@ export default function TerminalConsole({ logs, onClear }) {
             </div>
           ))
         )}
-        <div ref={terminalEndRef} />
       </div>
 
       {/* Terminal Footer */}
