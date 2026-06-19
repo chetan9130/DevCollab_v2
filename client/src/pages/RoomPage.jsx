@@ -128,6 +128,7 @@ export default function RoomPage() {
   // Modal or custom inline messaging state
   const [customMsgTarget, setCustomMsgTarget] = useState(null);
   const [customMsgInput, setCustomMsgInput] = useState('');
+  const [copiedId, setCopiedId] = useState(null);
 
   // Helper to add log entries
   const addLog = (type, message) => {
@@ -141,6 +142,63 @@ export default function RoomPage() {
         message,
       },
     ]);
+  };
+
+  // Helper to copy text to clipboard with modern API and robust fallback
+  const handleCopy = (text, type) => {
+    if (!text) return;
+
+    // Try modern API first
+    const tryModernCopy = () => {
+      if (navigator.clipboard) {
+        return navigator.clipboard.writeText(text);
+      }
+      return Promise.reject(new Error('Modern clipboard API not supported'));
+    };
+
+    // Fallback for non-secure contexts (HTTP), iframes, or unsupported browsers
+    const tryFallbackCopy = () => {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      // Configure styling to prevent page jump and hide the element
+      textarea.style.position = 'absolute';
+      textarea.style.opacity = '0';
+      textarea.style.left = '-9999px';
+      textarea.setAttribute('readonly', ''); // Prevent keyboard popup on iOS
+      document.body.appendChild(textarea);
+      
+      textarea.focus();
+      textarea.select();
+      textarea.setSelectionRange(0, 99999); // Mobile compatibility
+      
+      try {
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        if (successful) {
+          return Promise.resolve();
+        } else {
+          return Promise.reject(new Error('execCommand copy returned false'));
+        }
+      } catch (err) {
+        document.body.removeChild(textarea);
+        return Promise.reject(err);
+      }
+    };
+
+    tryModernCopy()
+      .catch((err) => {
+        console.warn('Modern clipboard API failed or restricted. Trying fallback copy method...', err);
+        return tryFallbackCopy();
+      })
+      .then(() => {
+        setCopiedId(type);
+        addLog('success', `Copied ${type === 'session' ? 'Session ID' : 'Workspace Room ID'} to clipboard!`);
+        setTimeout(() => setCopiedId(null), 2000);
+      })
+      .catch(err => {
+        console.error('All clipboard copy attempts failed: ', err);
+        addLog('error', 'Failed to copy to clipboard. Please copy manually.');
+      });
   };
 
   // Connect socket and register socket listeners on mount
@@ -679,15 +737,51 @@ export default function RoomPage() {
                 )}
                 <div>
                   <span className="text-xs text-slate-500 block">SESSION ID</span>
-                  <span className="text-sm text-indigo-300 break-all font-semibold select-all bg-indigo-950/30 px-2 py-1 rounded border border-indigo-900/40 block mt-1">
-                    {socketId}
-                  </span>
+                  <div className="flex items-center justify-between bg-indigo-950/30 px-2 py-1 rounded border border-indigo-900/40 mt-1">
+                    <span className="text-sm text-indigo-300 break-all font-semibold select-all truncate mr-2">
+                      {socketId}
+                    </span>
+                    <button
+                      onClick={() => handleCopy(socketId, 'session')}
+                      className="p-1 rounded bg-indigo-900/40 hover:bg-indigo-900/70 text-indigo-300 hover:text-indigo-100 transition-colors cursor-pointer shrink-0"
+                      title="Copy Session ID"
+                    >
+                      {copiedId === 'session' ? (
+                        <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      ) : (
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
                 </div>
                 <div>
                   <span className="text-xs text-slate-500 block">WORKSPACE ROOM</span>
-                  <span className="text-sm text-emerald-300 break-all font-semibold bg-emerald-950/30 px-2 py-1 rounded border border-emerald-900/40 block mt-1">
-                    {activeRoomId || 'Not in a room'}
-                  </span>
+                  <div className="flex items-center justify-between bg-emerald-950/30 px-2 py-1 rounded border border-emerald-900/40 mt-1">
+                    <span className="text-sm text-emerald-300 break-all font-semibold truncate mr-2">
+                      {activeRoomId || 'Not in a room'}
+                    </span>
+                    {activeRoomId && (
+                      <button
+                        onClick={() => handleCopy(activeRoomId, 'room')}
+                        className="p-1 rounded bg-emerald-900/40 hover:bg-emerald-900/70 text-emerald-300 hover:text-emerald-100 transition-colors cursor-pointer shrink-0"
+                        title="Copy Room ID"
+                      >
+                        {copiedId === 'room' ? (
+                          <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : (
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                        )}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             ) : (
