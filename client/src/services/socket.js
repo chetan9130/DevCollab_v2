@@ -1,6 +1,6 @@
 import { io } from 'socket.io-client';
 
-const SOCKET_URL = import.meta.env.VITE_WS_URL || 'http://localhost:5000';
+const SOCKET_URL = import.meta.env.VITE_WS_URL || 'http://localhost:5000'|| 'https://dev-collab-v2-qtvj.vercel.app/';
 
 let socket = null;
 
